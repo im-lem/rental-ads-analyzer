@@ -1,0 +1,4 @@
+pydantic==2.14.1
+google-genai==2.33.0
+ollama==0.6.3
+python-dotenv==1.2.4
