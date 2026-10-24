@@ -71,7 +71,7 @@ class RentalListing(BaseModel):
     location: Location                      
     pets_allowed: PetsPolicy
     landlord_type: LandlordType
-    amenities: list[Amenity]                  
+    amenities: list[Amenity] = Field(max_length=8)                  
     text_language: TextLanguage
 
 
@@ -89,9 +89,9 @@ if __name__ == "__main__":
         "amenities": ["furniture", "boiler"],
         "text_language": "uk",
     }
-    print(RentalListing.model_validate(good))   # ← этой строки не хватало
+    print(RentalListing.model_validate(good))   
 
-    bad = {                                      # ← 4 пробела: внутри if
+    bad = {                                      
         "property_type": "flat",
         "rooms": 0,
         "area_m2": 54.5,
@@ -102,7 +102,7 @@ if __name__ == "__main__":
         "amenities": ["sauna"],
         "text_language": "uk",
     }
-    try:                                         # ← 4 пробела: внутри if
+    try:                                        
         RentalListing.model_validate(bad)
     except ValidationError as e:
         print(e)
