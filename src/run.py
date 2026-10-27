@@ -10,7 +10,8 @@ import config
 from extractors import GeminiExtractor, OllamaExtractor
 
 
-provider, sampling_key, prompt_version, which = sys.argv[1:5] 
+# Запуск: python src\run.py <gemini|ollama> <t0|t07> <v1|v2> <all|golden>
+provider, sampling_key, prompt_version, which = sys.argv[1:5]
 
 load_dotenv()
 params = config.SAMPLING[sampling_key]
@@ -32,22 +33,38 @@ else:
 
 out_path = Path(f"results/{provider}_{prompt_version}_{sampling_key}.jsonl")
 
+
+def call_with_retry(prompt_text: str, ad: str, ad_id: str):
+    """Retry только для ошибок СЕТИ/API (таймаут, 429, 503).
+    Возвращает (result или None, число попыток, текст последней ошибки)."""
+    last_error = None
+    for attempt in range(1, config.MAX_RETRIES + 1):
+        try:
+            return ex.extract(prompt_text, ad), attempt, None
+        except Exception as e:
+            last_error = f"{type(e).__name__}: {e}"
+            print(f"  {ad_id}: попытка {attempt} не удалась ({last_error[:80]})")
+            time.sleep(10 * attempt)
+    return None, config.MAX_RETRIES, last_error
+
+
+def fix_prompt(base_prompt: str, bad_raw: str, error: str) -> str:
+    """Промпт для попытки исправления: тот же промпт + прошлый ответ + ошибка валидации.
+    Модель видит, ЧТО именно не так, и может это поправить."""
+    return (base_prompt
+            + "\n\nYour previous answer was INVALID.\n"
+            + "Previous answer:\n" + bad_raw[:2000]          # обрезаем: зацикленный ответ может быть огромным
+            + "\n\nValidation error:\n" + error[:1000]
+            + "\n\nReturn a corrected JSON for the same ad.")
+
+
 with open(out_path, "w", encoding="utf-8") as out:
     for ad_id in ids:
         ad = Path(f"data/ads/{ad_id}.txt").read_text(encoding="utf-8")
 
-        # Retry: при ошибке сети/таймауте/429 ждём и пробуем снова
-        result, last_error = None, None
-        for attempt in range(1, config.MAX_RETRIES + 1):
-            try:
-                result = ex.extract(prompt, ad)
-                break                                  
-            except Exception as e:                     
-                last_error = f"{type(e).__name__}: {e}"
-                print(f"  {ad_id}: попытка {attempt} не удалась ({last_error[:80]})")
-                time.sleep(10 * attempt)               
+        result, attempts, last_error = call_with_retry(prompt, ad, ad_id)
 
-        
+        # Лог: модель, версия промпта, параметры семплинга — в каждой строке
         record = {
             "id": ad_id,
             "provider": provider,
@@ -55,23 +72,46 @@ with open(out_path, "w", encoding="utf-8") as out:
             "prompt_version": prompt_version,
             "sampling": sampling_key,
             **params,
-            "attempts": attempt,
+            "attempts": attempts,
+            "fix_attempted": False,
         }
+
         if result is None:
+            # API так и не ответил — это не ошибка модели, а инфраструктуры
             record.update({"status": "api_error", "error": last_error})
         else:
+            latency = result.latency_s
+            in_tok, out_tok = result.input_tokens, result.output_tokens
+            status = "ok"
+
+            # Ответ пришёл, но не прошёл Pydantic → ОДНА попытка исправления
+            if not result.valid:
+                record["fix_attempted"] = True
+                record["first_error"] = result.error
+                record["first_raw"] = result.raw
+                print(f"  {ad_id}: invalid → попытка исправления")
+                fixed, _, fix_api_error = call_with_retry(
+                    fix_prompt(prompt, result.raw, result.error), ad, ad_id)
+                if fixed is not None:
+                    # Время и токены считаем за ОБА вызова — это честная цена документа
+                    latency += fixed.latency_s
+                    in_tok += fixed.input_tokens
+                    out_tok += fixed.output_tokens
+                    result = fixed
+                status = "fixed" if (fixed is not None and fixed.valid) else "failed"
+
             record.update({
-                "status": "ok" if result.valid else "invalid",
+                "status": status,                     # ok | fixed | failed | api_error
                 "output": result.listing.model_dump(mode="json") if result.valid else None,
                 "error": result.error,
                 "raw": result.raw,
-                "latency_s": round(result.latency_s, 2),
-                "input_tokens": result.input_tokens,
-                "output_tokens": result.output_tokens,
+                "latency_s": round(latency, 2),
+                "input_tokens": in_tok,
+                "output_tokens": out_tok,
             })
 
         out.write(json.dumps(record, ensure_ascii=False) + "\n")
-        out.flush()                                    
+        out.flush()                                    # строка на диске сразу — прогон можно прервать
         print(f"{ad_id}: {record['status']}  {record.get('latency_s', '-')} с")
 
         time.sleep(config.PAUSE_S[provider])
