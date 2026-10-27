@@ -1,8 +1,8 @@
 """Запуск одной командой.
 
-python main.py              — все прогоны (матрица модель × промпт × семплинг) + метрики
+python main.py              — Gemini v2 t0 на всех 30 текстах + метрики по всем результатам (≈4 мин)
+python main.py --all        — вся матрица модель × промпт × семплинг (нужна Ollama, ≈1 час на CPU) + метрики
 python main.py --metrics    — только пересчитать метрики по готовым results/*.jsonl
-python main.py --quick      — только Gemini v2 t0 на всех текстах + метрики (≈4 мин)
 """
 import subprocess
 import sys
@@ -30,9 +30,11 @@ def run(args):
 
 if __name__ == "__main__":
     flag = sys.argv[1] if len(sys.argv) > 1 else ""
-    if flag == "--quick":
-        run(["src/run.py", "gemini", "t0", "v2", "all"])
-    elif flag != "--metrics":
+    if flag == "--all":
         for exp in EXPERIMENTS:
             run(["src/run.py", *exp])
+    elif flag != "--metrics":
+        # По умолчанию — быстрый прогон выбранной для продакшна конфигурации.
+        # Остальные результаты уже лежат в results/, метрики считаются по всем.
+        run(["src/run.py", "gemini", "t0", "v2", "all"])
     run(["src/metrics.py"])

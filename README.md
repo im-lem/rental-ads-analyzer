@@ -42,9 +42,9 @@ copy .env.example .env          # Linux/macOS: cp .env.example .env
 ## Запуск
 
 ```
-python main.py --quick      # Gemini v2 на 30 текстах + метрики, ~4 хв
-python main.py              # уся матриця: 2 моделі × 2 промпти × 2 семплінги + метрики
-python main.py --metrics    # лише перерахувати метрики за results/
+python main.py             # Gemini v2 t0 на 30 текстах + метрики за всіма results/, ~4 хв (потрібен лише GEMINI_API_KEY)
+python main.py --all       # уся матриця: 2 моделі × 2 промпти × 2 семплінги + метрики (потрібна Ollama, ~1 год на CPU)
+python main.py --metrics   # лише перерахувати метрики за results/ (без API і Ollama)
 ```
 
 Окремий прогон: `python src/run.py <gemini|ollama> <t0|t07> <v1|v2> <all|golden>`
