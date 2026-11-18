@@ -36,7 +36,10 @@ JUDGE_MODELS = ["gemini-3.5-flash-lite", "gemini-3.1-flash-lite-preview"]
 JUDGE_THINKING = "LOW"   # для оценки по готовому эталону долгие «размышления» не нужны, а они медленные
 JUDGE_PROMPT = Path("prompts/rag/judge_v1.txt")
 
-PAUSE_S = 4          # пауза между вопросами: ~4 запроса к API на вопрос, держимся ниже минутных лимитов free tier
+# Пауза между вопросами. Free tier: gemini-3.1-flash-lite = 15 RPM, а на вопрос уходит 2 её запроса
+# (rerank + ответ). С паузой 4 с пик был 14/15 RPM (AI Studio, 18.11) — впритык; 8 с -> ~8 RPM с запасом
+# (CI и локальный прогон одновременно не упрутся в лимит). Цена: прогон ~8 мин вместо ~5.
+PAUSE_S = 8
 RETRY_PAUSE_S = 65   # при 429 ждём, пока обнулится минутное окно
 MAX_TRIES = 3
 
