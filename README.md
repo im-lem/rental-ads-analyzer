@@ -84,7 +84,7 @@ data/raw/ (22 HTML + 9 PDF, manifest.csv)
                          відповідь за JSON-схемою {answer, citations, insufficient} → перевірка номерів цитат
   └─ src/rag/evals.py    тестсет → метрики retrieval / детерміновані / LLM-judge → results/rag/
 prompts/rag/             rerank_v1.txt, answer_v1.txt, judge_v1.txt (версія в імені файлу)
-data/rag_testset.jsonl   29 питань: закон, податки, пастки (18%→5%, суміжні теми), поза корпусом
+data/rag_testset.jsonl   32 питання: закон, податки, пастки (18%→5%, суміжні теми), розмовні, поза корпусом
 .github/workflows/rag-evals.yml   evals у GitHub Actions з порогами метрик
 ```
 
