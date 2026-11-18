@@ -64,10 +64,13 @@ def build_context(hits: list[dict]) -> tuple[str, list[dict]]:
 
 
 def answer(question: str, retriever: Retriever, rerank: bool = True) -> dict:
-    hits = retriever.search(question, k=K, rerank=rerank)
+    trace: dict = {}
+    hits = retriever.search(question, k=K, rerank=rerank, trace=trace)
     result = {
         "question": question,
         "prompt_version": PROMPT_VERSION,
+        "retrieval": trace,                                     # ранжирования всех этапов поиска
+        "sources_text": {},                                     # текст процитированных чанков (для judge)
         "retrieved_chunk_ids": [h["chunk_id"] for h in hits],   # для recall@k без повторного поиска
         "max_llm_score": None,
         "answer": REFUSAL,
@@ -113,6 +116,8 @@ def answer(question: str, retriever: Retriever, rerank: bool = True) -> dict:
         "citations": [by_n[n] for n in sorted(cited) if n in by_n],
         "bad_citations": sorted(n for n in cited if n not in by_n),
     })
+    text_by_id = {h["chunk_id"]: h["text"] for h in hits}
+    result["sources_text"] = {s["n"]: text_by_id[s["chunk_id"]] for s in result["citations"]}
     return result
 
 

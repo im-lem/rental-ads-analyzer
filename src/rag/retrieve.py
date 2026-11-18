@@ -109,11 +109,17 @@ class Retriever:
         return {cand[it.id]: it.score for it in items if 0 <= it.id < len(cand)}
 
     def search(self, query: str, k: int = 5, rerank: bool = True,
-               doc_types: set[str] | None = None, date_from: str | None = None) -> list[dict]:
+               doc_types: set[str] | None = None, date_from: str | None = None,
+               trace: dict | None = None) -> list[dict]:
+        """trace (для evals): если передать dict, в него запишутся полные ранжирования
+        каждого этапа (chunk_id) — так один вызов даёт метрики для BM25 / вектора / гибрида / rerank."""
         mask = self._mask(doc_types, date_from)
         bm, vec = self.bm25_rank(query, mask), self.vector_rank(query, mask)
         fused = rrf([bm, vec])
         order = sorted(fused, key=fused.get, reverse=True)
+        if trace is not None:
+            ids = lambda idx: [self.chunks[i]["chunk_id"] for i in idx]
+            trace.update(bm25=ids(bm), vector=ids(vec), hybrid=ids(order))
 
         llm = {}
         if rerank and order:
@@ -124,6 +130,8 @@ class Retriever:
             if llm:
                 # сначала оценка LLM, при равенстве — место в RRF; непереоценённые — в конце
                 order = sorted(order, key=lambda i: (-llm.get(i, -1), -fused[i]))
+        if trace is not None:
+            trace["rerank"] = [self.chunks[i]["chunk_id"] for i in order] if llm else None
 
         results = []
         for i in order[:k]:

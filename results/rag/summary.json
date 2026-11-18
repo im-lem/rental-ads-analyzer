@@ -1,0 +1,22 @@
+{
+  "n_questions": 29,
+  "hit@1_bm25": 0.792,
+  "hit@5_bm25": 0.958,
+  "mrr_bm25": 0.873,
+  "hit@1_vector": 0.75,
+  "hit@5_vector": 0.958,
+  "mrr_vector": 0.842,
+  "hit@1_hybrid": 0.75,
+  "hit@5_hybrid": 1.0,
+  "mrr_hybrid": 0.851,
+  "hit@1_rerank": 0.833,
+  "hit@5_rerank": 1.0,
+  "mrr_rerank": 0.899,
+  "refusal_accuracy": 1.0,
+  "citation_validity": 1.0,
+  "must_match": 0.958,
+  "cited_gold": 1.0,
+  "judge_correctness": 0.959,
+  "faithfulness": 1.0,
+  "complete": true
+}
