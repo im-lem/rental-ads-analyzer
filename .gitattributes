@@ -1,0 +1,3 @@
+# Корпус і результати — дані, а не код: не враховувати у статистиці мов GitHub (Linguist)
+data/** linguist-vendored
+results/** linguist-vendored
