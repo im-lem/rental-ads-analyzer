@@ -85,7 +85,7 @@ data/raw/ (22 HTML + 9 PDF, manifest.csv)
                          відповідь за JSON-схемою {answer, citations, insufficient} → перевірка номерів цитат
   └─ src/rag/evals.py    тестсет → метрики retrieval / детерміновані / LLM-judge → results/rag/
 prompts/rag/             rerank_v1.txt, answer_v1.txt, judge_v1.txt (версія в імені файлу)
-data/rag_testset.jsonl   32 питання: закон, податки, пастки (18%→5%, суміжні теми), розмовні, поза корпусом
+data/rag_testset.jsonl   35 питань: закон, податки, пастки (18%→5%, суміжні теми), розмовні, фільтр, відмови
 .github/workflows/rag-evals.yml   evals у GitHub Actions з порогами метрик
 ```
 
@@ -119,7 +119,7 @@ data/rag_testset.jsonl   32 питання: закон, податки, паст
 
 | що | де |
 |---|---|
-| тестсет (32 питання, перевірені людиною) | `data/rag_testset.jsonl` |
+| тестсет (35 питань, перевірені людиною) | `data/rag_testset.jsonl` |
 | scoring-функції (retrieval, детерміновані, LLM-judge, калібрування) | `src/rag/evals.py`, промпт судді `prompts/rag/judge_v1.txt` |
 | результати прогону | `results/rag/` (`summary.md`, `eval_results.jsonl`, `judge_calibration.csv`) |
 | CI | `.github/workflows/rag-evals.yml` |
@@ -135,6 +135,8 @@ Evals додають суддю ≈ 2 500 / 150 токенів на питанн
 
 ```
 python main.py rag "Яка ставка ПДФО з доходу від здачі квартири в оренду?"
+python main.py rag "..." --types law,dps --date-from 2026-10-23   # фільтри за метаданими
+python main.py rag "..." --no-rerank # без rerank (поріг рівня 1 вимкнено → перевірка рівня 2 «не знаю»)
 python main.py rag-eval              # усі питання тестсету, ~10–15 хв на free tier
 python main.py rag-eval --limit 5    # швидка перевірка
 python main.py rag-eval --calibration  # згода LLM-judge з ручною розміткою (без API)

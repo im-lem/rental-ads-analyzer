@@ -2,6 +2,7 @@
 
 Запуск:
   python -m src.rag.answer "Яка ставка ПДФО з доходу від здачі квартири в оренду?"
+  python -m src.rag.answer "..." --types dps,law --date-from 2026-10-23
 """
 import argparse
 import re
@@ -63,11 +64,16 @@ def build_context(hits: list[dict]) -> tuple[str, list[dict]]:
     return "\n\n".join(blocks), sources
 
 
-def answer(question: str, retriever: Retriever, rerank: bool = True) -> dict:
+def answer(question: str, retriever: Retriever, rerank: bool = True,
+           doc_types: set[str] | None = None, date_from: str | None = None) -> dict:
+    """doc_types / date_from — фильтр по метаданным (тип документа, дата не раньше YYYY-MM-DD).
+    Документы без даты (закон) фильтр по дате не отбрасывает — см. Retriever._mask."""
     trace: dict = {}
-    hits = retriever.search(question, k=K, rerank=rerank, trace=trace)
+    hits = retriever.search(question, k=K, rerank=rerank, trace=trace,
+                            doc_types=doc_types, date_from=date_from)
     result = {
         "question": question,
+        "filters": {"doc_types": sorted(doc_types) if doc_types else None, "date_from": date_from},
         "prompt_version": PROMPT_VERSION,
         "retrieval": trace,                                     # ранжирования всех этапов поиска
         "sources_text": {},                                     # текст процитированных чанков (для judge)
@@ -125,9 +131,13 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("question")
     ap.add_argument("--no-rerank", action="store_true")
+    ap.add_argument("--types", help="фильтр по типу, через запятую: law,dps,article,guide")
+    ap.add_argument("--date-from", help="только документы с датой >= YYYY-MM-DD (закон без даты остаётся)")
     args = ap.parse_args()
 
-    r = answer(args.question, Retriever(), rerank=not args.no_rerank)
+    r = answer(args.question, Retriever(), rerank=not args.no_rerank,
+               doc_types=set(args.types.split(",")) if args.types else None,
+               date_from=args.date_from)
     print(r["answer"], "\n")
     for s in r["citations"]:
         art = f", ст. {s['article']}" if s["article"] else ""

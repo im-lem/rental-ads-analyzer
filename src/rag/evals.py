@@ -141,7 +141,10 @@ def judge(client, item: dict, res: dict) -> tuple[Judgment, str]:
 
 def run_item(r: Retriever, item: dict) -> dict:
     def pipeline():
-        res = answer(item["question"], r)
+        f = item.get("filters") or {}        # необязательный фильтр по метаданным для вопроса
+        res = answer(item["question"], r,
+                     doc_types=set(f["doc_types"]) if f.get("doc_types") else None,
+                     date_from=f.get("date_from"))
         if res["retrieval"].get("rerank") is None:     # rerank упал (обычно 429) — метрики были бы нечестными
             raise RuntimeError("rerank не отработал")
         return res
