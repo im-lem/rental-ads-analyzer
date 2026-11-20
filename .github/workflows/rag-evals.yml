@@ -26,7 +26,7 @@ concurrency:                  # не запускать два прогона п
 jobs:
   evals:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 60       # обычный прогон ~11–16 мин + запас на backoff при 503 (до ~7.5 мин на вопрос)
     steps:
       - uses: actions/checkout@v4
 

@@ -41,8 +41,12 @@ JUDGE_PROMPT = Path("prompts/rag/judge_v1.txt")
 # (rerank + ответ). С паузой 4 с пик был 14/15 RPM (AI Studio, 18.11) — впритык; 8 с -> ~8 RPM с запасом
 # (CI и локальный прогон одновременно не упрутся в лимит). Цена: прогон ~8 мин вместо ~5.
 PAUSE_S = 8
-RETRY_PAUSE_S = 65   # при 429 ждём, пока обнулится минутное окно
-MAX_TRIES = 3
+# Паузы между повторами при 429/503 — exponential backoff (каждая вдвое длиннее).
+# Было 3 попытки по 65 с (~2 мин ожидания): хватало на 429 (минутное окно), но CI #2 (20.11) дважды
+# упал на 503 «high demand» — перегрузка модели длилась дольше. Теперь до ~7.5 мин на вопрос;
+# 30+60 = 90 с > 60 с, так что минутное окно 429 тоже переживаем.
+RETRY_DELAYS_S = [30, 60, 120, 240]
+MAX_TRIES = len(RETRY_DELAYS_S) + 1
 
 # Пороги для CI. Заданы ДО первого прогона, из смысла метрики, а не подогнаны под результат.
 THRESHOLDS = {
@@ -73,8 +77,10 @@ def with_retry(fn, what: str):
             # суточная квота кончилась — ждать минуту бесполезно, падаем сразу (результаты уже на диске)
             if attempt == MAX_TRIES or "PerDay" in str(e):
                 raise
-            print(f"   {what}: {e.__class__.__name__}: {str(e)[:120]} -> повтор через {RETRY_PAUSE_S} с")
-            time.sleep(RETRY_PAUSE_S)
+            delay = RETRY_DELAYS_S[attempt - 1]
+            print(f"   {what}: {e.__class__.__name__}: {str(e)[:120]} "
+                  f"-> попытка {attempt}/{MAX_TRIES}, повтор через {delay} с", flush=True)
+            time.sleep(delay)
 
 
 def doc_ranking(chunk_ids: list[str] | None) -> list[str]:
