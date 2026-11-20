@@ -1,7 +1,8 @@
-"""Шаг 2a RAG: эмбеддинги чанков -> data/processed/embeddings.npy (+ chunk_ids.json).
+"""Шаг 2a RAG: эмбеддинги чанков -> векторная база FAISS data/processed/faiss.index (+ chunk_ids.json).
 
-Векторная «база» — матрица numpy (168 x 768): при таком объёме отдельная БД не нужна,
-поиск = одно матричное умножение. BM25-индекс не сохраняем — строится за миллисекунды.
+FAISS IndexFlatIP — точный поиск по скалярному произведению (векторы нормированы -> это косинус).
+Приближённые индексы (HNSW, IVF) нужны от сотен тысяч векторов; на 168 они бы только теряли точность.
+Позиция вектора в индексе = позиция чанка в chunk_ids.json. BM25-индекс не сохраняем — строится за миллисекунды.
 
 Запуск:  python -m src.rag.index
 """
@@ -10,13 +11,14 @@ import os
 import time
 from pathlib import Path
 
+import faiss
 import numpy as np
 from dotenv import load_dotenv
 from google import genai
 from google.genai import types
 
 CHUNKS_PATH = Path("data/processed/chunks.jsonl")
-EMB_PATH = Path("data/processed/embeddings.npy")
+INDEX_PATH = Path("data/processed/faiss.index")
 IDS_PATH = Path("data/processed/chunk_ids.json")
 
 EMBED_MODEL = "gemini-embedding-001"
@@ -59,6 +61,13 @@ def embed(client: genai.Client, texts: list[str], task_type: str) -> np.ndarray:
     return vecs / np.linalg.norm(vecs, axis=1, keepdims=True)
 
 
+def save_index(emb: np.ndarray, chunk_ids: list[str]) -> None:
+    index = faiss.IndexFlatIP(emb.shape[1])
+    index.add(np.ascontiguousarray(emb, dtype=np.float32))
+    faiss.write_index(index, str(INDEX_PATH))
+    IDS_PATH.write_text(json.dumps(chunk_ids), encoding="utf-8")
+
+
 def main() -> None:
     chunks = load_chunks()
     client = get_client()
@@ -70,9 +79,8 @@ def main() -> None:
         print(f"эмбеддинги {i + 1}–{i + len(batch)} из {len(chunks)}")
         parts.append(embed(client, [embed_input(c) for c in batch], "RETRIEVAL_DOCUMENT"))
     emb = np.vstack(parts)
-    np.save(EMB_PATH, emb)
-    IDS_PATH.write_text(json.dumps([c["chunk_id"] for c in chunks]), encoding="utf-8")
-    print(f"Готово: {emb.shape} -> {EMB_PATH}")
+    save_index(emb, [c["chunk_id"] for c in chunks])
+    print(f"Готово: {emb.shape} -> {INDEX_PATH}")
 
 
 if __name__ == "__main__":

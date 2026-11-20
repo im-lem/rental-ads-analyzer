@@ -9,12 +9,13 @@ import json
 import re
 from pathlib import Path
 
+import faiss
 import numpy as np
 from google.genai import types
 from pydantic import BaseModel
 from rank_bm25 import BM25Okapi
 
-from src.rag.index import EMB_PATH, IDS_PATH, embed, get_client, load_chunks
+from src.rag.index import INDEX_PATH, IDS_PATH, embed, get_client, load_chunks
 
 RERANK_MODEL = "gemini-3.1-flash-lite"
 RERANK_PROMPT = Path("prompts/rag/rerank_v1.txt")
@@ -64,9 +65,9 @@ class Retriever:
         self.chunks = load_chunks()
         ids = json.loads(IDS_PATH.read_text(encoding="utf-8"))
         if ids != [c["chunk_id"] for c in self.chunks]:
-            raise RuntimeError("chunks.jsonl и embeddings.npy рассинхронизированы: "
+            raise RuntimeError("chunks.jsonl и faiss.index рассинхронизированы: "
                                "перезапусти python -m src.rag.index")
-        self.emb = np.load(EMB_PATH)
+        self.index = faiss.read_index(str(INDEX_PATH))
         self.bm25 = BM25Okapi([tokenize(c["title"] + "\n" + c["text"]) for c in self.chunks])
         self.client = get_client()
 
@@ -86,9 +87,11 @@ class Retriever:
         return [int(i) for i in order if scores[i] > 0]   # 0 = ни одного общего слова
 
     def vector_rank(self, query: str, mask: np.ndarray) -> list[int]:
-        q = embed(self.client, [query], "RETRIEVAL_QUERY")[0]
-        scores = np.where(mask, self.emb @ q, -np.inf)    # векторы нормированы -> dot = cos
-        return [int(i) for i in np.argsort(-scores)[:N_CANDIDATES] if mask[i]]
+        q = embed(self.client, [query], "RETRIEVAL_QUERY")
+        # Фильтр по метаданным применяем после поиска: при 168 векторах берём всё ранжирование
+        # (точный поиск, доли миллисекунды) и выкидываем отфильтрованные — топ не «пустеет».
+        _, idx = self.index.search(q, self.index.ntotal)   # IndexFlatIP: dot = cos (векторы нормированы)
+        return [int(i) for i in idx[0] if i >= 0 and mask[i]][:N_CANDIDATES]
 
     def rerank(self, query: str, cand: list[int]) -> dict[int, int]:
         """LLM ставит каждому кандидату оценку 0–3. Один запрос на все кандидаты."""

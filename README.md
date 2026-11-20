@@ -71,12 +71,13 @@ python main.py --metrics   # лише перерахувати метрики з
 ```
 data/raw/ (22 HTML + 9 PDF, manifest.csv)
   └─ src/rag/ingest.py   очистка: trafilatura (HTML), pymupdf (PDF, в т.ч. 3-колонковий буклет),
-                         видалення колонтитулів і рядків-«шапок», спільних для сторінок домену
-       → data/processed/docs.jsonl        (doc_id, title, doc_type, doc_date, url, text)
+                         видалення колонтитулів і рядків-«шапок», спільних для сторінок домену,
+                         дедуплікація за content hash (sha256 нормалізованого тексту)
+       → data/processed/docs.jsonl        (doc_id, title, doc_type, doc_date, url, doc_hash, text)
   └─ src/rag/chunk.py    закон: 1 стаття ЦК = 1 чанк (поле article); інше: ≤1000 симв. по рядках, overlap 1
-       → data/processed/chunks.jsonl      (168 чанків + метадані документа)
-  └─ src/rag/index.py    gemini-embedding-001, 768 вимірів, title+text
-       → data/processed/embeddings.npy, chunk_ids.json
+       → data/processed/chunks.jsonl      (168 чанків; метадані: джерело/url, назва, тип, дата, стаття, doc_hash)
+  └─ src/rag/index.py    gemini-embedding-001, 768 вимірів, title+text → FAISS IndexFlatIP (косинус)
+       → data/processed/faiss.index, chunk_ids.json
   └─ src/rag/retrieve.py BM25 (стемінг обрізкою до 5 літер) + вектор → RRF → фільтри (тип, дата)
                          → LLM-rerank (gemini-3.1-flash-lite, оцінки 0–3)
   └─ src/rag/answer.py   поріг «не знаю» (max rerank < 2 → відмова без виклику моделі) →
@@ -88,6 +89,48 @@ data/rag_testset.jsonl   32 питання: закон, податки, паст
 .github/workflows/rag-evals.yml   evals у GitHub Actions з порогами метрик
 ```
 
+## Chunking: чому так
+
+Корпус двох видів, і різати їх однаково — погано:
+
+- **Закон (глава 59 ЦК): 1 стаття = 1 чанк.** Стаття — природна смислова одиниця і одиниця цитування
+  («ст. 820 ЦК»): номер статті зберігається в метаданих `article` і йде в посилання. Статті короткі
+  (медіана 464 симв.), тож чанк не перевантажує контекст.
+- **Статті, роз'яснення ДПС, буклети: абзаци/рядки, набрані до 1000 симв., overlap 1 абзац.** Межа завжди
+  на кінці абзацу/рядка, тому чанк не обриває слово чи пункт списку. 1000 симв. ≈ 340 токенів — вміщає
+  один змістовний блок (питання ДПС + відповідь, підрозділ статті), а в бюджет контексту (12 000 симв.)
+  влазить 8+ чанків з різних джерел. Overlap у 1 абзац — щоб думка на межі не загубилась.
+  Довгі рядки без переносів (PDF) ріжемо по реченнях.
+
+**Порівняння з фіксованим розміром** (вікно 1000 симв., overlap 100) на 5 документах різної форми —
+`python -m src.rag.chunk_compare` → [results/rag/chunking_compare.md](results/rag/chunking_compare.md):
+
+| | наша стратегія | fixed 1000/100 |
+|---|---|---|
+| чанків, що ріжуть слово (5 документів) | 0% | 33–85% |
+| статей ЦК, розрізаних між чанками (з 17) | 0 | 7 |
+| чанків, що змішують ≥2 статті | 0 | 10 |
+| BM25: потрібна стаття в топ-3 (12 питань) | **1.00** | 0.75 |
+
+Висновок: на законі фіксований розмір ламає і пошук, і цитування (у чанку дві статті — яку цитувати?).
+На статтях різниця менша, але fixed все одно обриває слова й речення посередині.
+
+## Де що лежить (evals)
+
+| що | де |
+|---|---|
+| тестсет (32 питання, перевірені людиною) | `data/rag_testset.jsonl` |
+| scoring-функції (retrieval, детерміновані, LLM-judge, калібрування) | `src/rag/evals.py`, промпт судді `prompts/rag/judge_v1.txt` |
+| результати прогону | `results/rag/` (`summary.md`, `eval_results.jsonl`, `judge_calibration.csv`) |
+| CI | `.github/workflows/rag-evals.yml` |
+
+## Вартість
+
+Free tier Gemini — безкоштовно. На платному тарифі (`gemini-3.1-flash-lite`: $0.25 / 1M вхідних,
+$1.50 / 1M вихідних токенів): одне питання ≈ 8 200 вхідних (rerank ≈ 3 150 + відповідь ≈ 4 950) і ≈ 350
+вихідних токенів → **≈ $2.6 за 1000 питань** (відмова рівня 1 дешевша — без виклику відповіді).
+Evals додають суддю ≈ 2 500 / 150 токенів на питання. Індексація корпусу (≈ 50k токенів ембедінгів) — < $0.01.
+
 ## Запуск
 
 ```
@@ -96,6 +139,7 @@ python main.py rag-eval              # усі питання тестсету, ~
 python main.py rag-eval --limit 5    # швидка перевірка
 python main.py rag-eval --calibration  # згода LLM-judge з ручною розміткою (без API)
 python main.py rag-build             # перезібрати корпус та індекс (не потрібно: data/processed/ у репозиторії)
+python -m src.rag.chunk_compare      # порівняння chunking з фіксованим розміром (без API)
 ```
 
 Окремі кроки: `python -m src.rag.retrieve "питання" [--no-rerank] [--types law,dps] [--date-from 2026-01-01]`.

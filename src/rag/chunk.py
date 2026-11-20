@@ -82,7 +82,7 @@ def split_paragraphs(text: str) -> list[str]:
 
 # ---------- main ----------
 
-META_KEYS = ("doc_id", "title", "doc_type", "doc_date", "url", "format")
+META_KEYS = ("doc_id", "title", "doc_type", "doc_date", "url", "format", "doc_hash")
 
 
 def build_chunks(docs: list[dict]) -> list[dict]:

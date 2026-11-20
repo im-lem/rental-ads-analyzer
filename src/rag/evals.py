@@ -6,7 +6,8 @@
   python -m src.rag.evals --calibration   только сверить judge с ручной разметкой (без API)
 
 Три слоя метрик:
-  1. retrieval (детерминированные): hit@k и MRR по документам для BM25 / вектора / гибрида / гибрид+rerank;
+  1. retrieval (детерминированные): hit@k и MRR для BM25 / вектора / гибрида / гибрид+rerank —
+     по документам (все вопросы с gold) и по чанкам (вопросы по ЦК: статья из эталона = чанк);
   2. ответ, детерминированные: отказ там, где надо; ключевые факты (regex); валидность цитат; цитата на эталонный документ;
   3. ответ, LLM-judge: correctness (0–2, против эталона) и faithfulness (0/1, против процитированных источников).
 """
@@ -87,6 +88,20 @@ def doc_ranking(chunk_ids: list[str] | None) -> list[str]:
     return docs
 
 
+LAW_DOC = "ck_glava59_buhgalter911"
+ART_RE = re.compile(r"ст\.\s*(\d+)\s*ЦК")
+
+
+def gold_chunks(item: dict, chunks: list[dict]) -> set[str]:
+    """Эталонный ЧАНК известен для вопросов по главе 59 ЦК: номер статьи указан в эталоне
+    («(ст. 819 ЦК)»), а 1 статья = 1 чанк. Для статей/ДПС факт повторяется во многих чанках —
+    там меряем только по документам. Разбираем эталон, а не выдачу системы."""
+    if item["gold_docs"] != [LAW_DOC]:
+        return set()
+    arts = set(ART_RE.findall(item["reference"]))
+    return {c["chunk_id"] for c in chunks if c["doc_id"] == LAW_DOC and c["article"] in arts}
+
+
 def first_gold_rank(docs: list[str], gold: set[str]) -> int | None:
     for r, d in enumerate(docs, start=1):
         if d in gold:
@@ -138,6 +153,10 @@ def run_item(r: Retriever, item: dict) -> dict:
     if gold:
         for m in MODES:
             row[f"rank_{m}"] = first_gold_rank(doc_ranking(res["retrieval"].get(m)), gold)
+    gchunks = gold_chunks(item, r.chunks)
+    if gchunks:
+        for m in MODES:
+            row[f"chunk_rank_{m}"] = first_gold_rank(res["retrieval"].get(m) or [], gchunks)
 
     # 2. детерминированные проверки ответа
     answered = not res["insufficient"]
@@ -176,6 +195,13 @@ def summarize(rows: list[dict]) -> dict:
         s[f"hit@1_{m}"] = mean([rk == 1 for rk in ranks])
         s[f"hit@5_{m}"] = mean([rk is not None and rk <= 5 for rk in ranks])
         s[f"mrr_{m}"] = mean([1 / rk if rk else 0 for rk in ranks])
+    cret = [x for x in rows if "chunk_rank_bm25" in x]
+    s["n_chunk_gold"] = len(cret)
+    for m in MODES:
+        ranks = [x[f"chunk_rank_{m}"] for x in cret]
+        s[f"chunk_hit@1_{m}"] = mean([rk == 1 for rk in ranks])
+        s[f"chunk_hit@5_{m}"] = mean([rk is not None and rk <= 5 for rk in ranks])
+        s[f"chunk_mrr_{m}"] = mean([1 / rk if rk else 0 for rk in ranks])
     s["refusal_accuracy"] = mean([x["refusal_ok"] for x in rows])
     s["citation_validity"] = mean([x.get("citation_valid") for x in rows])
     s["must_match"] = mean([x.get("must_match") for x in rows])
@@ -191,6 +217,10 @@ def report_md(s: dict, rows: list[dict]) -> str:
              "## Retrieval (по документам)", "", "| режим | hit@1 | hit@5 | MRR |", "|---|---|---|---|"]
     for m in MODES:
         lines.append(f"| {m} | {s[f'hit@1_{m}']} | {s[f'hit@5_{m}']} | {s[f'mrr_{m}']} |")
+    lines += ["", f"## Retrieval (по чанкам: статья ЦК из эталона, {s['n_chunk_gold']} вопросов)", "",
+              "| режим | hit@1 | hit@5 | MRR |", "|---|---|---|---|"]
+    for m in MODES:
+        lines.append(f"| {m} | {s[f'chunk_hit@1_{m}']} | {s[f'chunk_hit@5_{m}']} | {s[f'chunk_mrr_{m}']} |")
     lines += ["", "## Ответ", "", "| метрика | значение | порог |", "|---|---|---|"]
     for k in ["refusal_accuracy", "citation_validity", "must_match", "cited_gold",
               "judge_correctness", "faithfulness"]:

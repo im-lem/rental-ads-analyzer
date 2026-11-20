@@ -3,6 +3,7 @@
 Запуск:  python -m src.rag.ingest
 """
 import csv
+import hashlib
 import json
 import re
 from collections import Counter
@@ -96,7 +97,30 @@ def build_docs() -> list[dict]:
                 "text": text,
             })
     remove_site_boilerplate(docs)
-    return docs
+    return dedup(docs)
+
+
+def content_hash(text: str) -> str:
+    """sha256 нормализованного текста: регистр и пробелы не делают документ «другим»
+    (одна статья, перепечатанная на двух сайтах, или один PDF под двумя именами)."""
+    norm = re.sub(r"\s+", " ", text.lower()).strip()
+    return hashlib.sha256(norm.encode("utf-8")).hexdigest()[:16]
+
+
+def dedup(docs: list[dict]) -> list[dict]:
+    """Точные дубликаты по content hash: оставляем первый по manifest, остальные выбрасываем.
+    Хеш пишем в метаданные — он же попадает в каждый чанк (версия документа)."""
+    seen: dict[str, str] = {}
+    kept = []
+    for d in docs:
+        h = content_hash(d["text"])
+        d["doc_hash"] = h
+        if h in seen:
+            print(f"дубликат: {d['doc_id']} == {seen[h]} -> пропущен")
+            continue
+        seen[h] = d["doc_id"]
+        kept.append(d)
+    return kept
 
 
 def remove_site_boilerplate(docs: list[dict], share: float = 0.6, min_docs: int = 3) -> None:
